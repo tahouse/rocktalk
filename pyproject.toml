@@ -1,0 +1,160 @@
+[tool.poetry]
+name = "your-project-name"
+version = "0.1.0"
+description = "A short description of your project"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+packages = [{ include = "your_project_name" }]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+# Add your project dependencies here, for example:
+# requests = "^2.25.1"
+
+# [tool.poetry]
+# name = "rocktalk"
+# version = "0.1.0"
+# description = "RockTalk project"
+# authors = ["Your Name <your.email@example.com>"]
+# readme = "README.md"
+# packages = [{ include = "rocktalk" }]
+# python = ">=3.11"
+
+# [tool.poetry.group.dev.dependencies]
+
+# [tool.poetry.dependencies]
+# python = "^3.11"
+# aiohappyeyeballs = "^2.4.3"
+# aiohttp = "^3.10.10"
+# aiosignal = "^1.3.1"
+# altair = "^5.4.1"
+# annotated-types = "^0.7.0"
+# anyio = "^4.6.2"
+# attrs = "^24.2.0"
+# beautifulsoup4 = "^4.12.3"
+# blinker = "^1.8.2"
+# boto3 = "^1.35.44"
+# boto3-stubs = { extras = ["bedrock"], version = "^1.35.62" }
+# botocore = "^1.35.44"
+# cachetools = "^5.5.0"
+# certifi = "^2024.8.30"
+# charset-normalizer = "^3.4.0"
+# click = "^8.1.7"
+# frozenlist = "^1.4.1"
+# gitdb = "^4.0.11"
+# GitPython = "^3.1.43"
+# greenlet = "^3.1.1"
+# httpcore = "^1.0.6"
+# httpx = "^0.27.2"
+# langchain = "^0.3.4"
+# langchain-aws = "^0.2.2"
+# langchain-core = "^0.3.12"
+# langchain-text-splitters = "^0.3.0"
+# langsmith = "^0.1.136"
+# markdownify = "^0.13.1"
+# narwhals = "^1.9.4"
+# numpy = "^1.26.4"
+# pandas = "^2.2.3"
+# pillow = "^10.4.0"
+# propcache = "^0.2.0"
+# PyPDF2 = "^3.0.1"
+# python-dotenv = "^1.0.1"
+# requests = "^2.32.3"
+# streamlit = "^1.39.0"
+# streamlit-chat-prompt = ">=0.1.2"
+# SQLAlchemy = "^2.0.36"
+
+# [tool.poetry.group.dev.dependencies]
+# pytest = "^7.1.3"
+# black = "^24.10.0"
+# isort = "^5.10.1"
+# mypy = "^0.991"
+# flake8 = "^5.0.4"
+
+# [build-system]
+# requires = ["poetry-core"]
+# build-backend = "poetry.core.masonry.api"
+
+# [tool.black]
+# line-length = 88
+# target-version = ['py38']
+# include = '\.pyi?$'
+# extend-exclude = '''
+# /(
+#   # directories
+#   \.eggs
+#   | \.git
+#   | \.hg
+#   | \.mypy_cache
+#   | \.tox
+#   | \.venv
+#   | build
+#   | dist
+# )/
+# '''
+
+# [tool.isort]
+# profile = "black"
+# multi_line_output = 3
+# include_trailing_comma = true
+# force_grid_wrap = 0
+# use_parentheses = true
+# ensure_newline_before_comments = true
+# line_length = 88
+
+# [tool.mypy]
+# python_version = "3.11"
+# disallow_untyped_defs = true
+# ignore_missing_imports = true
+
+# [tool.pytest.ini_options]
+# minversion = "6.0"
+# addopts = "-ra -q"
+# testpaths = ["tests"]
+
+# pytest = "^7.1.3"
+# black = "^24.10.0"
+# isort = "^5.10.1"
+# mypy = "^0.991"
+# flake8 = "^5.0.4"
+
+# [build-system]
+# requires = ["poetry-core"]
+# build-backend = "poetry.core.masonry.api"
+
+# [tool.black]
+# line-length = 88
+# target-version = ['py38']
+# include = '\.pyi?$'
+# extend-exclude = '''
+# /(
+#   # directories
+#   \.eggs
+#   | \.git
+#   | \.hg
+#   | \.mypy_cache
+#   | \.tox
+#   | \.venv
+#   | build
+#   | dist
+# )/
+# '''
+
+# [tool.isort]
+# profile = "black"
+# multi_line_output = 3
+# include_trailing_comma = true
+# force_grid_wrap = 0
+# use_parentheses = true
+# ensure_newline_before_comments = true
+# line_length = 88
+
+# [tool.mypy]
+# python_version = "3.8"
+# disallow_untyped_defs = true
+# ignore_missing_imports = true
+
+# [tool.pytest.ini_options]
+# minversion = "6.0"
+# addopts = "-ra -q"
+# testpaths = ["tests"]

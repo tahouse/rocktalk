@@ -1,4 +1,5 @@
 import json
+import pprint
 import uuid
 from datetime import datetime
 from enum import Enum
@@ -8,7 +9,7 @@ from typing import Dict, List, Optional
 import streamlit as st
 from langchain.schema import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from PIL.ImageFile import ImageFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from streamlit_chat_prompt import ImageData, PromptReturn, prompt
 from streamlit_js_eval import streamlit_js_eval
 from utils.image_utils import MAX_IMAGE_WIDTH, image_from_b64_image
@@ -69,24 +70,10 @@ def copy_value_to_clipboard(value: str):
 
 
 class LLMParameters(BaseModel):
-    temperature: float
+    temperature: float = 0.5
     max_output_tokens: Optional[int] = None
     top_p: Optional[float] = None
     top_k: Optional[int] = None  # Additional parameter for Anthropic models
-
-
-class LLMPresetName(Enum):
-    BALANCED = "Balanced"
-    DETERMINISTIC = "Deterministic"
-    CREATIVE = "Creative"
-    CUSTOM = "Custom"
-
-
-PRESET_CONFIGS: Dict[LLMPresetName, LLMParameters] = {
-    LLMPresetName.DETERMINISTIC: LLMParameters(temperature=0.0),
-    LLMPresetName.CREATIVE: LLMParameters(temperature=0.9),
-    LLMPresetName.BALANCED: LLMParameters(temperature=0.5),
-}
 
 
 _DEFAULT_LLM_CONFIG: Optional["LLMConfig"] = None
@@ -94,7 +81,6 @@ _DEFAULT_LLM_CONFIG: Optional["LLMConfig"] = None
 
 class LLMConfig(BaseModel):
     bedrock_model_id: str
-    region_name: str
     parameters: LLMParameters
     stop_sequences: List[str] = Field(default_factory=list)
     system: Optional[str] = None
@@ -113,15 +99,30 @@ class LLMConfig(BaseModel):
     @staticmethod
     def get_default() -> "LLMConfig":
         global _DEFAULT_LLM_CONFIG
-        if _DEFAULT_LLM_CONFIG is None:
-            preset_parm = PRESET_CONFIGS[LLMPresetName.BALANCED]
-            _DEFAULT_LLM_CONFIG = LLMConfig(
+        if _DEFAULT_LLM_CONFIG:
+            return _DEFAULT_LLM_CONFIG
+        else:
+            config = LLMConfig(
                 bedrock_model_id="anthropic.claude-3-5-sonnet-20241022-v2:0",
-                region_name="us-west-2",  # TODO use AWS_REGION
-                parameters=preset_parm,
+                parameters=LLMParameters(temperature=0.5),
             )
+            LLMConfig.set_default(config)
+            return config
+        # # This would need to be updated to get the storage instance
+        # from storage.sqlite_storage import SQLiteChatStorage
 
-        return _DEFAULT_LLM_CONFIG.model_copy(deep=True)
+        # storage = SQLiteChatStorage()
+        # templates = storage.get_chat_templates()
+        # print(pprint.pformat(templates))
+        # # Get the "Balanced" template or the first preset if "Balanced" doesn't exist
+        # template = next(
+        #     (template for template in templates if template.name == "Balanced"),
+        #     templates[0] if templates else None,
+        # )
+        # if template:
+        #     print("getting default LLM config, returning template")
+        #     return LLMConfig.model_validate(template.config)
+        # Fallback default if no presets exist
 
     @staticmethod
     def set_default(llm_config: "LLMConfig") -> None:
@@ -143,12 +144,18 @@ class TurnState(Enum):
     COMPLETE = "complete"
 
 
+class ChatTemplate(BaseModel):
+    name: str
+    description: str
+    template_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    config: LLMConfig = Field(default_factory=LLMConfig.get_default)
+
+
 class ChatMessage(BaseModel):
     session_id: str
     role: str
     content: str | list[str | dict]
     index: int
-    metadata: Optional[Dict] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.now)
 
     @st.dialog("Edit Message")
@@ -346,38 +353,11 @@ class ChatMessage(BaseModel):
 
 
 class ChatSession(BaseModel):
-    session_id: str
     title: str
-    metadata: Optional[Dict] = Field(default_factory=dict)
+    session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = Field(default_factory=datetime.now)
     last_active: datetime = Field(default_factory=datetime.now)
-    message_count: Optional[int] = None
-    first_message: Optional[datetime] = None
-    last_message: Optional[datetime] = None
     config: LLMConfig = Field(default_factory=LLMConfig.get_default)
-
-    @staticmethod
-    def create(
-        title: str,
-        metadata: Optional[Dict] = None,
-        created_at: Optional[datetime] = None,
-        last_active: Optional[datetime] = None,
-        config: Optional[LLMConfig] = None,
-    ) -> "ChatSession":
-        """Create a new chat session"""
-        session_id = str(uuid.uuid4())
-        current_time = datetime.now()
-        created_at = created_at or current_time
-        last_active = last_active or created_at
-
-        return ChatSession(
-            session_id=session_id,
-            title=title,
-            metadata=metadata or {},
-            created_at=created_at,
-            last_active=last_active,
-            config=config or st.session_state.llm.get_config(),
-        )
 
 
 class ChatExport(BaseModel):

@@ -7,7 +7,7 @@ import streamlit as st
 import streamlit.components.v1 as stcomponents
 from langchain.schema import BaseMessage, HumanMessage
 from langchain_core.messages import AIMessage
-from models.interfaces import ChatMessage, ChatSession, TurnState
+from models.interfaces import ChatMessage, ChatSession, LLMConfig, TurnState
 from models.llm import LLMInterface
 from models.storage_interface import StorageInterface
 from streamlit_chat_prompt import PromptReturn, pin_bottom, prompt
@@ -435,9 +435,8 @@ class ChatInterface:
                 # Create new session if none exists
                 if not st.session_state.current_session_id:
                     title: str = self._generate_session_title()
-                    new_session: ChatSession = ChatSession.create(
-                        title=title, config=self.llm.get_config().model_copy()
-                    )
+                    config = self.llm.get_config().model_copy(deep=True)
+                    new_session: ChatSession = ChatSession(title=title, config=config)
                     st.session_state.current_session_id = new_session.session_id
                     self.storage.store_session(new_session)
                     # Update session_id for all messages and save
@@ -463,6 +462,7 @@ class ChatInterface:
         Note:
             Falls back to timestamp-based title if LLM fails to generate one.
         """
+        logger.info("Generating session title...")
 
         title_prompt: HumanMessage = HumanMessage(
             content=f"""Summarize this conversation's topic in up to 5 words or about 28 characters.

@@ -1,11 +1,11 @@
-from datetime import datetime, timedelta
-from rocktalk.storage.sqlite_storage import SQLiteChatStorage
-from rocktalk.utils.datetime_utils import format_datetime, parse_datetime_string
-from rocktalk.utils.date_utils import DATETIME_FORMAT
-from rocktalk.models.interfaces import ChatSession, ChatMessage
-import random
-from typing import List, Dict
 import os
+import random
+from datetime import datetime, timedelta
+from typing import Dict, List
+
+from models.interfaces import ChatMessage, ChatSession
+from storage.sqlite_storage import SQLiteChatStorage
+from utils.datetime_utils import format_datetime, parse_datetime_string
 
 
 class TestDataGenerator:
@@ -123,14 +123,8 @@ class TestDataGenerator:
                 conversation = self.sample_conversations[conv_type]
 
                 # Create session with formatted timestamp
-                session = ChatSession.create(
+                session = ChatSession(
                     title=f"Chat {date_str[:10]} - {conv_type}",  # Use just the date part for the title
-                    subject=f"Sample {desc}",
-                    metadata={
-                        "test_data": True,
-                        "conversation_type": conv_type,
-                        "generated_on": date_str,
-                    },
                     created_at=base_datetime,
                     last_active=base_datetime,
                 )
@@ -138,21 +132,24 @@ class TestDataGenerator:
 
                 # Add messages with timestamps spaced a few minutes apart
                 message_time = base_datetime
+                index = 0
                 for role, content in conversation:
                     message = ChatMessage(
                         session_id=session.session_id,
                         role=role,
                         content=content,
+                        index=index,
                         created_at=message_time,
                     )
                     storage.save_message(message)
                     message_time += timedelta(minutes=random.randint(1, 5))
+                    index += 1
 
         return storage
 
 
 def create_sample_database(
-    reference_date: datetime = None, db_path: str = "test_chat_database.db"
+    reference_date: datetime | None = None, db_path: str = "test_chat_database.db"
 ):
     """
     Convenience function to create a sample database

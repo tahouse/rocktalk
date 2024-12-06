@@ -2,7 +2,13 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import List
 
-from models.interfaces import ChatMessage, ChatSession
+from models.interfaces import (
+    ChatMessage,
+    ChatSession,
+    ChatTemplate,
+    LLMConfig,
+    LLMParameters,
+)
 
 
 class StorageInterface(ABC):
@@ -78,4 +84,64 @@ class StorageInterface(ABC):
     @abstractmethod
     def rename_session(self, session_id: str, new_title: str) -> None:
         """Rename a chat session"""
+        ...
+
+    @staticmethod
+    def get_default_templates() -> List[ChatTemplate]:
+        """Get the default chat templates"""
+        return [
+            ChatTemplate(
+                name="Balanced",
+                description="Balanced between creativity and consistency",
+                config=LLMConfig(
+                    bedrock_model_id="anthropic.claude-3-5-sonnet-20241022-v2:0",
+                    parameters=LLMParameters(temperature=0.5),
+                ),
+            ),
+            ChatTemplate(
+                name="Deterministic",
+                description="Precise and consistent responses",
+                config=LLMConfig(
+                    bedrock_model_id="anthropic.claude-3-5-sonnet-20241022-v2:0",
+                    parameters=LLMParameters(temperature=0.0),
+                ),
+            ),
+            ChatTemplate(
+                name="Creative",
+                description="More varied and creative responses",
+                config=LLMConfig(
+                    bedrock_model_id="anthropic.claude-3-5-sonnet-20241022-v2:0",
+                    parameters=LLMParameters(temperature=0.9),
+                ),
+            ),
+        ]
+
+    @abstractmethod
+    def initialize_preset_templates(self) -> None:
+        """Initialize the default preset templates if they don't exist"""
+        ...
+
+    @abstractmethod
+    def store_chat_template(self, template: ChatTemplate) -> None:
+        """Store a new chat template"""
+        ...
+
+    @abstractmethod
+    def get_chat_template(self, template_id: str) -> ChatTemplate:
+        """Get a specific chat template"""
+        ...
+
+    @abstractmethod
+    def update_chat_template(self, template: ChatTemplate) -> None:
+        """Update an existing chat template"""
+        ...
+
+    @abstractmethod
+    def delete_chat_template(self, template_id: str) -> None:
+        """Delete a chat template"""
+        ...
+
+    @abstractmethod
+    def get_chat_templates(self) -> List[ChatTemplate]:
+        """Get all chat templates"""
         ...

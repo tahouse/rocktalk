@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List
 
 from config.settings import LLMConfig
-from models.interfaces import ChatMessage, ChatSession
+from models.interfaces import ChatMessage, ChatSession, ChatTemplate
 from models.storage_interface import StorageInterface
 from utils.datetime_utils import format_datetime, parse_datetime
 
@@ -39,7 +39,6 @@ class SQLiteChatStorage(StorageInterface):
                     title TEXT NOT NULL,
                     created_at TIMESTAMP NOT NULL,
                     last_active TIMESTAMP NOT NULL,
-                    metadata TEXT,
                     config TEXT NOT NULL
                 );
 
@@ -50,24 +49,33 @@ class SQLiteChatStorage(StorageInterface):
                     content TEXT NOT NULL,
                     message_index INTEGER NOT NULL,
                     timestamp TIMESTAMP NOT NULL,
-                    metadata TEXT,
                     FOREIGN KEY (session_id) REFERENCES sessions(session_id),
                     UNIQUE(session_id, message_index)  -- Ensure unique indexes per session
                 );
 
+                CREATE TABLE IF NOT EXISTS chat_templates (
+                        template_id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        description TEXT NOT NULL, 
+                        config TEXT NOT NULL
+                    );
+
                 -- Indexes for better search performance
-                CREATE INDEX IF NOT EXISTS idx_messages_session_id
-                ON messages(session_id, message_index);
 
                 CREATE INDEX IF NOT EXISTS idx_sessions_last_active
                 ON sessions(last_active);
 
+                CREATE INDEX IF NOT EXISTS idx_messages_session_id
+                ON messages(session_id, message_index);
+
                 CREATE INDEX IF NOT EXISTS idx_messages_timestamp
                 ON messages(timestamp);
+
+                CREATE INDEX IF NOT EXISTS idx_templates_name 
+                ON chat_templates(name);
             """
-                # CREATE INDEX IF NOT EXISTS idx_messages_content
-                # ON messages(content);
             )
+            self.initialize_preset_templates()
 
     def store_session(self, session: ChatSession) -> None:
 
@@ -75,15 +83,14 @@ class SQLiteChatStorage(StorageInterface):
             conn.execute(
                 """
                 INSERT INTO sessions
-                (session_id, title, created_at, last_active, metadata, config)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (session_id, title, created_at, last_active, config)
+                VALUES (?, ?, ?, ?, ?)
             """,
                 (
                     session.session_id,
                     session.title,
                     format_datetime(session.created_at),
                     format_datetime(session.last_active),
-                    json.dumps(session.metadata),
                     session.config.model_dump_json(),
                 ),
             )
@@ -93,13 +100,12 @@ class SQLiteChatStorage(StorageInterface):
             conn.execute(
                 """
                 UPDATE sessions
-                SET title = ?, last_active = ?, metadata = ?, config = ?
+                SET title = ?, last_active = ?, config = ?
                 WHERE session_id = ?
             """,
                 (
                     session.title,
                     format_datetime(session.last_active),
-                    json.dumps(session.metadata),
                     json.dumps(session.config.model_dump()),
                     session.session_id,
                 ),
@@ -111,8 +117,8 @@ class SQLiteChatStorage(StorageInterface):
             conn.execute(
                 """
                 INSERT INTO messages
-                (session_id, role, content, message_index, timestamp, metadata)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (session_id, role, content, message_index, timestamp)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     message.session_id,
@@ -120,7 +126,6 @@ class SQLiteChatStorage(StorageInterface):
                     json.dumps(message.content),
                     message.index,
                     format_datetime(message.created_at),
-                    json.dumps(message.metadata),
                 ),
             )
             # Update session's last_active timestamp
@@ -201,7 +206,6 @@ class SQLiteChatStorage(StorageInterface):
             content=json.loads(row["content"]),
             index=row["message_index"],
             created_at=parse_datetime(row["timestamp"]),
-            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
         )
 
     def _deserialize_session(self, row: sqlite3.Row) -> ChatSession:
@@ -212,25 +216,7 @@ class SQLiteChatStorage(StorageInterface):
             title=session_data["title"],
             created_at=parse_datetime(session_data["created_at"]),
             last_active=parse_datetime(session_data["last_active"]),
-            metadata=(
-                json.loads(session_data["metadata"]) if session_data["metadata"] else {}
-            ),
-            message_count=session_data.get("message_count"),
-            first_message=(
-                parse_datetime(session_data["first_message"])
-                if session_data.get("first_message")
-                else None
-            ),
-            last_message=(
-                parse_datetime(session_data["last_message"])
-                if session_data.get("last_message")
-                else None
-            ),
-            config=(
-                LLMConfig.model_validate_json(session_data["config"])
-                if session_data.get("config")
-                else LLMConfig.get_default()
-            ),
+            config=LLMConfig.model_validate_json(session_data["config"], strict=True),
         )
 
     def get_messages(self, session_id: str) -> List[ChatMessage]:
@@ -372,13 +358,106 @@ class SQLiteChatStorage(StorageInterface):
                 # Delete all sessions
                 conn.execute("DELETE FROM sessions")
 
-                # # also delete the tables
-                # conn.execute("DROP TABLE IF EXISTS sessions")
-                # conn.execute("DROP TABLE IF EXISTS messages")
-
                 # Commit the transaction
                 conn.execute("COMMIT")
             except Exception as e:
                 # If any error occurs, rollback the transaction
                 conn.execute("ROLLBACK")
                 raise RuntimeError(f"Failed to delete all sessions: {str(e)}")
+
+    def _deserialize_template(self, row: sqlite3.Row) -> ChatTemplate:
+        """Deserialize a template from the database row"""
+        return ChatTemplate(
+            template_id=row["template_id"],
+            name=row["name"],
+            description=row["description"],
+            config=LLMConfig.model_validate_json(row["config"], strict=True),
+        )
+
+    def store_chat_template(self, template: ChatTemplate) -> None:
+        with self.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO chat_templates 
+                (template_id, name, description, config)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    template.template_id,
+                    template.name,
+                    template.description,
+                    template.config.model_dump_json(),
+                ),
+            )
+
+    def initialize_preset_templates(self) -> None:
+        """Initialize default preset templates if they don't exist"""
+        presets = super().get_default_templates()
+
+        with self.get_connection() as conn:
+            for template in presets:
+                # Check if preset already exists
+                cursor = conn.execute(
+                    "SELECT 1 FROM chat_templates WHERE name = ?",
+                    (template.name,),
+                )
+                if not cursor.fetchone():
+                    self.store_chat_template(template)
+
+    def get_chat_template(self, template_id: str) -> ChatTemplate:
+        """Get a specific chat template"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT * FROM chat_templates 
+                WHERE template_id = ?
+                """,
+                (template_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError(f"No template found with id {template_id}")
+            return self._deserialize_template(row)
+
+    def get_chat_templates(self) -> List[ChatTemplate]:
+        """Get all chat templates"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT * FROM chat_templates 
+                ORDER BY name
+                """
+            )
+            return [self._deserialize_template(row) for row in cursor.fetchall()]
+
+    def update_chat_template(self, template: ChatTemplate) -> None:
+        """Update an existing chat template"""
+        with self.get_connection() as conn:
+            result = conn.execute(
+                """
+                UPDATE chat_templates
+                SET name = ?, description = ?, config = ?
+                WHERE template_id = ?
+                """,
+                (
+                    template.name,
+                    template.description,
+                    template.config.model_dump_json(),
+                    template.template_id,
+                ),
+            )
+            if result.rowcount == 0:
+                raise ValueError(f"No template found with id {template.template_id}")
+
+    def delete_chat_template(self, template_id: str) -> None:
+        """Delete a chat template"""
+        with self.get_connection() as conn:
+            result = conn.execute(
+                """
+                DELETE FROM chat_templates 
+                WHERE template_id = ?
+                """,
+                (template_id,),
+            )
+            if result.rowcount == 0:
+                raise ValueError(f"No template found with id {template_id}")

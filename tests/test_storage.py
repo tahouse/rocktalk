@@ -1,146 +1,187 @@
-# tests/test_storage.py
-import pytest
+import os
+import random
 from datetime import datetime, timedelta
-from abc import ABC
-from typing import Type, Dict
+from typing import Dict, List
 
-from storage.storage import ChatStorage
+from models.interfaces import ChatMessage, ChatSession, LLMConfig, LLMParameters
 from storage.sqlite_storage import SQLiteChatStorage
-# Future implementations would be imported here
-# from storage.postgres_storage import PostgresChatStorage
+from utils.datetime_utils import format_datetime, parse_datetime_string
 
-class AbstractStorageTest(ABC):
-    """
-    Abstract base class for storage tests.
-    Any new storage implementation should be tested using this suite.
-    """
-    
-    storage_class: Type[ChatStorage] = None
-    
-    @pytest.fixture
-    def storage(self) -> ChatStorage:
-        """Should be implemented by concrete test classes"""
-        raise NotImplementedError
-        
-    @pytest.fixture
-    def sample_session(self, storage: ChatStorage) -> Dict:
-        """Create a sample session with messages for testing"""
-        session_id = storage.create_session(
-            title="Test Session",
-            subject="Testing",
-            metadata={"test": True}
+
+class TestDataGenerator:
+    def __init__(self, reference_date: datetime = datetime(2024, 10, 22)):
+        """
+        Initialize the generator with a reference date (default: Oct 22, 2024)
+        All dates will be relative to this reference date
+        """
+        self.reference_date = reference_date
+        self.default_config = LLMConfig(
+            bedrock_model_id="anthropic.claude-3-sonnet-20240229-v1:0",
+            parameters=LLMParameters(
+                temperature=0.7, max_output_tokens=4096, top_p=0.9
+            ),
         )
-        
-        # Add some test messages
-        messages = [
-            ("user", "Hello"),
-            ("assistant", "Hi there"),
-            ("user", "How are you?"),
-            ("assistant", "I'm doing well")
+        self.sample_conversations = {
+            "tech_support": [
+                ("user", "How do I fix my printer?"),
+                (
+                    "assistant",
+                    "Let's try some basic troubleshooting. Is it connected and powered on?",
+                ),
+                ("user", "Yes, but it's not printing"),
+                (
+                    "assistant",
+                    "Try turning it off and on, then check if there are any error messages.",
+                ),
+            ],
+            "python_help": [
+                ("user", "Can you help me with Python lists?"),
+                (
+                    "assistant",
+                    "Sure! Lists are ordered collections in Python. What would you like to know?",
+                ),
+                ("user", "How do I add items?"),
+                (
+                    "assistant",
+                    "You can use .append() to add single items or .extend() for multiple items.",
+                ),
+            ],
+            "casual_chat": [
+                ("user", "How's your day going?"),
+                ("assistant", "I'm functioning well! How can I help you today?"),
+                ("user", "Just wanted to chat"),
+                (
+                    "assistant",
+                    "That's nice! I'm always happy to engage in conversation.",
+                ),
+            ],
+            "book_recommendation": [
+                ("user", "Can you recommend a good sci-fi book?"),
+                ("assistant", "Have you read 'Project Hail Mary' by Andy Weir?"),
+                ("user", "No, what's it about?"),
+                (
+                    "assistant",
+                    "It's about a lone astronaut who wakes up in space with amnesia. It's full of science and problem-solving.",
+                ),
+            ],
+        }
+
+    def generate_date_points(self) -> List[Dict]:
+        """
+        Generate a list of dates with their descriptions
+        Returns dates formatted according to our standard format
+        """
+        ref_date = self.reference_date
+        return [
+            {
+                "date": format_datetime(ref_date - timedelta(days=3)),
+                "desc": "Recent - Few days ago",
+            },
+            {
+                "date": format_datetime(ref_date - timedelta(weeks=2)),
+                "desc": "Recent - Couple weeks ago",
+            },
+            {
+                "date": format_datetime(ref_date - timedelta(days=45)),
+                "desc": "Month and a half ago",
+            },
+            {
+                "date": format_datetime(ref_date - timedelta(days=90)),
+                "desc": "Three months ago",
+            },
+            {
+                "date": format_datetime(ref_date - timedelta(days=180)),
+                "desc": "Six months ago",
+            },
+            {
+                "date": format_datetime(ref_date - timedelta(days=270)),
+                "desc": "Nine months ago",
+            },
+            {
+                "date": format_datetime(ref_date - timedelta(days=365)),
+                "desc": "One year ago",
+            },
+            {
+                "date": format_datetime(ref_date - timedelta(days=456)),
+                "desc": "15 months ago",
+            },
         ]
-        
-        for role, content in messages:
-            storage.save_message(
-                session_id=session_id,
-                role=role,
-                content=content,
-                metadata={"test": True}
-            )
-            
-        return {"session_id": session_id, "messages": messages}
 
-    def test_create_session(self, storage: ChatStorage):
-        """Test creating a new session"""
-        session_id = storage.create_session(
-            title="Test Session",
-            subject="Testing",
-            metadata={"test": True}
-        )
-        
-        session_info = storage.get_session_info(session_id)
-        assert session_info["title"] == "Test Session"
-        assert session_info["subject"] == "Testing"
-        assert session_info["message_count"] == 0
+    def create_test_database(self, db_path: str = "test_chat_database.db"):
+        """
+        Create a test database with sample conversations using standardized datetime format
+        """
+        if os.path.exists(db_path):
+            os.remove(db_path)
 
-    def test_save_and_retrieve_message(self, storage: ChatStorage, sample_session):
-        """Test saving and retrieving messages"""
-        session_id = sample_session["session_id"]
-        
-        # Get all messages
-        messages = storage.get_session_messages(session_id)
-        
-        # Verify message count
-        assert len(messages) == len(sample_session["messages"])
-        
-        # Verify message content
-        for saved_msg, (role, content) in zip(messages, sample_session["messages"]):
-            assert saved_msg["role"] == role
-            assert saved_msg["content"] == content
+        storage = SQLiteChatStorage(db_path)
+        dates = self.generate_date_points()
 
-    def test_date_range_search(self, storage: ChatStorage, sample_session):
-        """Test searching sessions by date range"""
-        now = datetime.now()
-        
-        # Should find our session
-        recent_sessions = storage.get_active_sessions_by_date_range(
-            start_date=now - timedelta(hours=1),
-            end_date=now + timedelta(hours=1)
-        )
-        assert len(recent_sessions) == 1
-        assert recent_sessions[0]["session_id"] == sample_session["session_id"]
-        
-        # Should not find any sessions
-        old_sessions = storage.get_active_sessions_by_date_range(
-            start_date=now - timedelta(days=2),
-            end_date=now - timedelta(days=1)
-        )
-        assert len(old_sessions) == 0
+        for date_info in dates:
+            base_datetime = parse_datetime_string(date_info["date"])
+            date_str = date_info["date"]
+            desc = date_info["desc"]
 
-    def test_search_sessions(self, storage: ChatStorage, sample_session):
-        """Test searching sessions"""
-        # Search by content
-        results = storage.search_sessions("Hello")
-        assert len(results) == 1
-        assert results[0]["session_id"] == sample_session["session_id"]
-        
-        # Search by title
-        results = storage.search_sessions("Test Session")
-        assert len(results) == 1
-        
-        # Search with no matches
-        results = storage.search_sessions("NonexistentContent")
-        assert len(results) == 0
+            # Create 1-2 sessions per date point
+            for session_num in range(random.randint(1, 2)):
+                conv_type = random.choice(list(self.sample_conversations.keys()))
+                conversation = self.sample_conversations[conv_type]
 
-    def test_delete_session(self, storage: ChatStorage, sample_session):
-        """Test deleting a session"""
-        session_id = sample_session["session_id"]
-        
-        # Verify session exists
-        assert storage.get_session_info(session_id) is not None
-        
-        # Delete session
-        storage.delete_session(session_id)
-        
-        # Verify session is gone
-        with pytest.raises(Exception):  # Specific exception type depends on implementation
-            storage.get_session_info(session_id)
+                # Create session with formatted timestamp
+                session = ChatSession(
+                    title=f"Chat {date_str[:10]}- {conv_type}",
+                    created_at=base_datetime,
+                    last_active=base_datetime,
+                    config=self.default_config,
+                )
+                storage.store_session(session)
 
-class TestSQLiteStorage(AbstractStorageTest):
-    """Concrete test class for SQLite implementation"""
-    
-    storage_class = SQLiteChatStorage
-    
-    @pytest.fixture
-    def storage(self, tmp_path) -> ChatStorage:
-        """Create a temporary SQLite database for testing"""
-        db_path = tmp_path / "test_chat.db"
-        return SQLiteChatStorage(db_path=str(db_path))
+                # Add messages with timestamps spaced a few minutes apart
+                message_time = base_datetime
+                for idx, (role, content) in enumerate(conversation):
+                    message = ChatMessage(
+                        session_id=session.session_id,
+                        role=role,
+                        content=content,
+                        index=idx,
+                        created_at=message_time,
+                    )
+                    storage.save_message(message)
+                    message_time += timedelta(minutes=random.randint(1, 5))
 
-# Future implementation tests would follow the same pattern
-# class TestPostgresStorage(AbstractStorageTest):
-#     storage_class = PostgresChatStorage
-#     
-#     @pytest.fixture
-#     def storage(self) -> ChatStorage:
-#         # Setup test postgres database
-#         pass
+        return storage
+
+
+def create_sample_database(
+    reference_date: datetime | None = None, db_path: str = "test_chat_database.db"
+) -> SQLiteChatStorage:
+    """
+    Convenience function to create a sample database
+    """
+    if reference_date is None:
+        reference_date = datetime(2024, 12, 4)  # Default reference date
+
+    generator = TestDataGenerator(reference_date)
+    return generator.create_test_database(db_path)
+
+
+if __name__ == "__main__":
+    import logging
+    import traceback
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    logger = logging.getLogger(__name__)
+
+    try:
+        logger.info("Starting test database creation...")
+        storage = create_sample_database(db_path="chat_database.db")
+        logger.info("Default test database created successfully!")
+
+    except Exception as e:
+        logger.error("Error creating test database: %s", str(e))
+        logger.error("Full stack trace:")
+        logger.error(traceback.format_exc())
+        raise

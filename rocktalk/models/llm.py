@@ -32,7 +32,7 @@ class BedrockLLM(LLMInterface):
     def update_config(self, config: Optional[LLMConfig] = None) -> None:
         # debug(config)
         if config:
-            self._config: LLMConfig = config.model_copy()
+            self._config: LLMConfig = config.model_copy(deep=True)
         else:
             self._config = LLMConfig.get_default()
         self._update_llm()

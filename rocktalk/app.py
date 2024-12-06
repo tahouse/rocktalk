@@ -39,6 +39,13 @@ if "user_input_default" not in st.session_state:
     st.session_state.user_input_default = None
 if "message_copied" not in st.session_state:
     st.session_state.message_copied = 0
+if (
+    "current_session_id" not in st.session_state
+    or st.session_state.current_session_id is None
+):
+    st.subheader(
+        f"{app_config.page_title}: Powered by AWS Bedrock 🪨 + LangChain 🦜️🔗 + Streamlit 👑"
+    )
 
 st.markdown(
     """
@@ -232,14 +239,9 @@ console.log("js functions loaded");
 # Float feature initialization
 float_init()
 
-st.subheader(
-    f"{app_config.page_title}: Powered by AWS Bedrock 🪨 + LangChain 🦜️🔗 + Streamlit 👑"
-)
-
 # Password check
 if DEPLOYED and not check_password():
     st.stop()
-
 
 # Initialize storage in session state
 if "storage" not in st.session_state:
