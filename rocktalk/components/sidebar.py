@@ -150,12 +150,12 @@ class Sidebar:
     def _create_new_chat(self):
         """Handle new chat creation"""
         self.chat_interface.clear_session()
-        st.rerun()
+        # st.rerun() # is a no-op within callback
 
     def _load_session(self, session_id: str):
         """Handle session loading"""
         self.chat_interface.load_session(session_id)
-        st.rerun()
+        # st.rerun()  # is a no-op within callback
 
     def _open_global_settings(self):
         """Open global settings dialog"""
