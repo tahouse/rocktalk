@@ -12,6 +12,12 @@ from models.llm import LLMInterface
 from models.storage_interface import StorageInterface
 from streamlit_chat_prompt import PromptReturn, pin_bottom, prompt
 from streamlit_shortcuts import button
+from utils.js import (
+    adjust_chat_message_style,
+    focus_prompt,
+    scroll_to_bottom,
+    scroll_to_bottom_streaming,
+)
 from utils.log import logger
 
 
@@ -47,6 +53,8 @@ class ChatInterface:
             st.session_state.current_session_id = None  # str
         if "edit_message_value" not in st.session_state:
             st.session_state.edit_message_value = None  # ChatMessage, PromptReturn
+        if "skip_next_scroll" not in st.session_state:
+            st.session_state.skip_next_scroll = False
 
     def render(self) -> None:
         """Render the chat interface and handle the current turn state."""
@@ -66,153 +74,6 @@ class ChatInterface:
         else:
             return None
 
-    def _focus_prompt(self, container_key: str) -> None:
-        js = (
-            """<script>
-                function focusPromptTextarea() {
-                    const allIframes = window.parent.document.querySelectorAll('iframe');
-                    // Find the container with the st-key-... class
-                    const container = window.parent.document.querySelector('[class*="st-key-"""
-            + container_key
-            + """"]');
-                    if (container) {
-                        // Find the iframe within this container
-                        const promptIframe = container.querySelector('iframe') || 
-                                            container.querySelector('.stCustomComponentV1');
-                        if (promptIframe) {
-                            // First focus the iframe itself
-                            promptIframe.focus();
-                            
-                            // Then try to focus the textarea inside the iframe
-                            const iframeWindow = promptIframe.contentWindow;
-                            if (iframeWindow) {
-                                iframeWindow.postMessage({
-                                    type: 'focus_textarea'
-                                }, '*');
-                                console.log("focus_textarea posted");
-                            }
-                        } else {
-                            console.log('Could not find iframe in container:', container.innerHTML);
-                        }
-                    }
-                }
-                setTimeout(focusPromptTextarea, 100);
-                setTimeout(focusPromptTextarea, 1000);
-            </script>
-            """
-        )
-        stcomponents.html(js, height=0)
-
-    def _scroll_to_bottom(self) -> None:
-        """Scrolls to the bottom of the chat interface.
-
-        This method inserts a div element at the bottom of the chat and uses JavaScript
-        to scroll to it, ensuring the most recent messages are visible.
-        """
-        index = st.session_state.scroll_div_index
-        st.markdown(f"""<div id="end-of-chat-{index}"></div>""", unsafe_allow_html=True)
-
-        js = (
-            """
-        <script>
-            function scrollToBottom() {
-                // Break out of iframe and get the main window
-                const mainWindow = window.parent;
-                const endMarker = mainWindow.document.getElementById('"""
-            + f"""end-of-chat-{index}"""
-            + """');
-
-                if (endMarker) {
-                    endMarker.scrollIntoView({
-                        behavior: 'smooth',
-                        block: 'end'
-                    });
-                } else {
-                    // Fallback to scrolling the whole window
-                    mainWindow.scrollTo({
-                        top: mainWindow.document.documentElement.scrollHeight,
-                        behavior: 'smooth'
-                    });
-                }
-            }
-
-            // Call immediately and after a short delay to ensure content is loaded
-            scrollToBottom();
-            setTimeout(scrollToBottom, 100);
-        </script>
-        """
-        )
-
-        stcomponents.html(js, height=0)
-
-    def _scroll_to_bottom_streaming(self, selector: str = ".stMarkdown") -> None:
-        """Automatically scrolls the chat window during streaming responses.
-
-        This method adds a JavaScript script that handles auto-scrolling behavior during
-        message streaming. The scrolling continues until the user manually scrolls,
-        at which point auto-scrolling is disabled to respect user control.
-
-        The script implements the following features:
-            - Detects user scroll events (both wheel and touch)
-            - Automatically scrolls to the latest message every 100ms
-            - Stops auto-scrolling if user manually scrolls
-            - Automatically cleans up after 30 seconds
-
-        The scrolling behavior is implemented using smooth scrolling for better user
-        experience and targets the last markdown element in the chat window.
-        """
-        # Add scroll script with user interaction detection
-        js = (
-            """
-        <script>
-            let userHasScrolled = false;
-            let scrollInterval;
-
-            // Detect user scroll
-            window.parent.addEventListener('wheel', function() {
-                userHasScrolled = true;
-                if (scrollInterval) {
-                    clearInterval(scrollInterval);
-                }
-            }, { passive: true });
-
-            window.parent.addEventListener('touchmove', function() {
-                userHasScrolled = true;
-                if (scrollInterval) {
-                    clearInterval(scrollInterval);
-                }
-            }, { passive: true });
-
-            function keepInView() {
-                if (!userHasScrolled) {
-                    const items = window.parent.document.querySelectorAll('"""
-            + f"{selector}"
-            + """');
-                    if (items.length > 0) {
-                        const lastItem = items[items.length - 1];
-                        lastItem.scrollIntoView({
-                            behavior: 'smooth',
-                            block: 'end'
-                        });
-                        window.parent.document.documentElement.scrollTop += 100;  // 100px padding
-                    }
-                }
-            }
-
-            // Start auto-scroll only if user hasn't manually scrolled
-            scrollInterval = setInterval(keepInView, 100);
-
-            // Clear interval after 30 seconds as a safety measure
-            setTimeout(() => {
-                if (scrollInterval) {
-                    clearInterval(scrollInterval);
-                }
-            }, 30000);
-        </script>
-        """
-        )
-        stcomponents.html(js, height=0)
-
     def _stop_chat_stream(self):
         st.toast("Stopping stream")
         st.session_state.stop_chat_stream = True
@@ -222,32 +83,7 @@ class ChatInterface:
         # print(st.session_state.theme)
 
         if "theme" in st.session_state and st.session_state.theme:
-            st.markdown(
-                f"""
-            <style>
-                /* propogate the background color to entire user message container */
-                [class*='st-key-user_message_container_']
-                {{
-                    background-color: {st.session_state.theme['secondaryBackgroundColor']};
-                    /* border-radius: 0.5rem; */
-                }}
-
-                /* add padding to message containers to make some space for buttons */
-                [class*='st-key'][class*='_message_container_']
-                {{
-                    padding: 1rem;
-                }}
-
-                /*  right align message buttons */
-                [class*='st-key-message_buttons_']
-                {{
-                    display: flex !important;
-                    justify-content: flex-end !important; /* Right align */
-                }}
-            </style>
-            """,
-                unsafe_allow_html=True,
-            )
+            adjust_chat_message_style()
 
         system_message = self.get_system_message()
         if system_message:
@@ -264,7 +100,7 @@ class ChatInterface:
         if st.session_state.message_copied > 0:
             st.session_state.message_copied -= 1
         else:
-            self._scroll_to_bottom()
+            scroll_to_bottom()
 
     def _handle_edit_message(self) -> None:
         if st.session_state.edit_message_value:
@@ -324,7 +160,7 @@ class ChatInterface:
                     max_image_size=5 * 1024 * 1024,
                     default=st.session_state.user_input_default,
                 )
-        self._focus_prompt(prompt_container_key)
+        focus_prompt(prompt_container_key)
         st.session_state.user_input_default = None
 
         if chat_prompt_return and st.session_state.turn_state == TurnState.HUMAN_TURN:
@@ -335,7 +171,7 @@ class ChatInterface:
 
             human_message.display()
             st.session_state.scroll_div_index += 1
-            self._scroll_to_bottom()
+            scroll_to_bottom()
 
             # Save to storage if we have a session, otherwise save later after session title is generated
             if st.session_state.current_session_id:
@@ -386,110 +222,115 @@ class ChatInterface:
             # Convert messages to LLM format
             llm_messages: list[BaseMessage] = self._convert_messages_to_llm_format()
 
-            # Generate and display AI response
-            with st.chat_message("assistant"):
-                usage_data = None
-                latency = None
-                stop_reason = None
-                message_placeholder = st.empty()
+            with st.container(border=True, key="assistant_message_container_streaming"):
+                # Generate and display AI response
+                with st.chat_message("assistant"):
+                    usage_data = None
+                    latency = None
+                    stop_reason = None
+                    message_placeholder = st.empty()
 
-                with self.prompt_placeholder:
-                    # add a stop stream button
-                    stop_stream_button_key = "stop_stream_button"
-                    with st.container():
-                        button(
-                            label="Stop (⌘/⊞ + ⌫)",
-                            shortcut="Meta+backspace",
-                            help="Stop the current stream (⌘/⊞ + ⌫)",
-                            icon="🛑",
-                            on_click=self._stop_chat_stream,
-                            use_container_width=True,
-                        )
-                full_response: str = ""
-                self._scroll_to_bottom_streaming(
-                    # selector=f".st-key-{stop_stream_button_key}"
-                )
-                for chunk in self.llm.stream(input=llm_messages):
-                    chunk = cast(AIMessage, chunk)
-                    if st.session_state.stop_chat_stream:
-                        logger.info("Interrupting stream")
-                        break
-                    for item in chunk.content:
-                        if isinstance(item, dict) and "text" in item:
-                            text = item["text"]
-                            full_response += text
-                        message_placeholder.markdown(full_response + "▌")
-
-                    # Track metadata
-                    if chunk.response_metadata:
-                        if "stopReason" in chunk.response_metadata:
-                            stop_reason = chunk.response_metadata["stopReason"]
-                        if "metrics" in chunk.response_metadata:
-                            latency = chunk.response_metadata["metrics"].get(
-                                "latencyMs"
+                    with self.prompt_placeholder:
+                        # add a stop stream button
+                        stop_stream_button_key = "stop_stream_button"
+                        with st.container():
+                            button(
+                                label="Stop (⌘/⊞ + ⌫)",
+                                shortcut="Meta+backspace",
+                                help="Stop the current stream (⌘/⊞ + ⌫)",
+                                icon="🛑",
+                                on_click=self._stop_chat_stream,
+                                use_container_width=True,
                             )
-                    # Track usage data
-                    if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
-                        usage_data = chunk.usage_metadata
+                    full_response: str = ""
+                    scroll_to_bottom_streaming(
+                        # selector=f".st-key-{stop_stream_button_key}"
+                    )
+                    for chunk in self.llm.stream(input=llm_messages):
+                        chunk = cast(AIMessage, chunk)
+                        if st.session_state.stop_chat_stream:
+                            logger.info("Interrupting stream")
+                            break
+                        for item in chunk.content:
+                            if isinstance(item, dict) and "text" in item:
+                                text = item["text"]
+                                full_response += text
+                            message_placeholder.markdown(full_response + "▌")
 
-                metadata = {
-                    "usage_data": usage_data,
-                    "latency_ms": latency,
-                    "stop_reason": stop_reason,
-                }
+                        # Track metadata
+                        if chunk.response_metadata:
+                            if "stopReason" in chunk.response_metadata:
+                                stop_reason = chunk.response_metadata["stopReason"]
+                            if "metrics" in chunk.response_metadata:
+                                latency = chunk.response_metadata["metrics"].get(
+                                    "latencyMs"
+                                )
+                        # Track usage data
+                        if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+                            usage_data = chunk.usage_metadata
 
-                if st.session_state.stop_chat_stream:
-                    metadata["stop_reason"] = "interrupted"
-                    logger.debug(f"LLM response: {metadata}")
+                    metadata = {
+                        "usage_data": usage_data,
+                        "latency_ms": latency,
+                        "stop_reason": stop_reason,
+                    }
 
-                    st.session_state.stop_chat_stream = False
-                    message_placeholder.empty()
+                    if st.session_state.stop_chat_stream:
+                        metadata["stop_reason"] = "interrupted"
+                        logger.debug(f"LLM response: {metadata}")
+
+                        st.session_state.stop_chat_stream = False
+                        message_placeholder.empty()
+                        st.session_state.turn_state = TurnState.HUMAN_TURN
+                        last_human_message: ChatMessage = (
+                            st.session_state.messages.pop()
+                        )
+                        self.storage.delete_messages_from_index(
+                            session_id=st.session_state.current_session_id,
+                            from_index=last_human_message.index,
+                        )
+                        st.session_state.user_input_default = (
+                            last_human_message.to_prompt_return()
+                        )
+                        st.rerun()
+
+                    message_placeholder.markdown(full_response)
+                    logger.debug(f"LLM response: {full_response}\n{metadata}")
+
+                    # Create ChatMessage
+                    current_index = len(st.session_state.messages)
+
+                    st.session_state.messages.append(
+                        ChatMessage(
+                            session_id=st.session_state.current_session_id or "",
+                            role="assistant",
+                            content=full_response,
+                            index=current_index,
+                        )
+                    )
+
+                    # Create new session if none exists
+                    if not st.session_state.current_session_id:
+                        title: str = self._generate_session_title()
+                        config = self.llm.get_config().model_copy(deep=True)
+                        new_session: ChatSession = ChatSession(
+                            title=title, config=config
+                        )
+                        st.session_state.current_session_id = new_session.session_id
+                        self.storage.store_session(new_session)
+                        # Update session_id for all messages and save
+                        for msg in st.session_state.messages:
+                            msg.session_id = new_session.session_id
+
+                        # save to storage the original human message we didn't save initially
+                        self.storage.save_message(message=st.session_state.messages[-2])
+
+                    # Save AI message
+                    self.storage.save_message(message=st.session_state.messages[-1])
+
+                    # Update state for next human input
                     st.session_state.turn_state = TurnState.HUMAN_TURN
-                    last_human_message: ChatMessage = st.session_state.messages.pop()
-                    self.storage.delete_messages_from_index(
-                        session_id=st.session_state.current_session_id,
-                        from_index=last_human_message.index,
-                    )
-                    st.session_state.user_input_default = (
-                        last_human_message.to_prompt_return()
-                    )
                     st.rerun()
-
-                message_placeholder.markdown(full_response)
-                logger.debug(f"LLM response: {full_response}\n{metadata}")
-
-                # Create ChatMessage
-                current_index = len(st.session_state.messages)
-
-                st.session_state.messages.append(
-                    ChatMessage(
-                        session_id=st.session_state.current_session_id or "",
-                        role="assistant",
-                        content=full_response,
-                        index=current_index,
-                    )
-                )
-
-                # Create new session if none exists
-                if not st.session_state.current_session_id:
-                    title: str = self._generate_session_title()
-                    config = self.llm.get_config().model_copy(deep=True)
-                    new_session: ChatSession = ChatSession(title=title, config=config)
-                    st.session_state.current_session_id = new_session.session_id
-                    self.storage.store_session(new_session)
-                    # Update session_id for all messages and save
-                    for msg in st.session_state.messages:
-                        msg.session_id = new_session.session_id
-
-                    # save to storage the original human message we didn't save initially
-                    self.storage.save_message(message=st.session_state.messages[-2])
-
-                # Save AI message
-                self.storage.save_message(message=st.session_state.messages[-1])
-
-                # Update state for next human input
-                st.session_state.turn_state = TurnState.HUMAN_TURN
-                st.rerun()
 
     def _generate_session_title(self) -> str:
         """Generate a concise session title using the LLM.
