@@ -70,7 +70,7 @@ sniffio==1.3.1
 soupsieve==2.6
 SQLAlchemy==2.0.36
 streamlit==1.40.2
-streamlit-chat-prompt>=0.3.3
+streamlit-chat-prompt>=0.3.4
 streamlit-js-eval==0.1.7
 streamlit-shortcuts==0.1.9
 streamlit_float==0.3.5

@@ -66,6 +66,43 @@ class ChatInterface:
         else:
             return None
 
+    def _focus_prompt(self, container_key: str) -> None:
+        js = (
+            """<script>
+                function focusPromptTextarea() {
+                    const allIframes = window.parent.document.querySelectorAll('iframe');
+                    // Find the container with the st-key-... class
+                    const container = window.parent.document.querySelector('[class*="st-key-"""
+            + container_key
+            + """"]');
+                    if (container) {
+                        // Find the iframe within this container
+                        const promptIframe = container.querySelector('iframe') || 
+                                            container.querySelector('.stCustomComponentV1');
+                        if (promptIframe) {
+                            // First focus the iframe itself
+                            promptIframe.focus();
+                            
+                            // Then try to focus the textarea inside the iframe
+                            const iframeWindow = promptIframe.contentWindow;
+                            if (iframeWindow) {
+                                iframeWindow.postMessage({
+                                    type: 'focus_textarea'
+                                }, '*');
+                                console.log("focus_textarea posted");
+                            }
+                        } else {
+                            console.log('Could not find iframe in container:', container.innerHTML);
+                        }
+                    }
+                }
+                setTimeout(focusPromptTextarea, 100);
+                setTimeout(focusPromptTextarea, 1000);
+            </script>
+            """
+        )
+        stcomponents.html(js, height=0)
+
     def _scroll_to_bottom(self) -> None:
         """Scrolls to the bottom of the chat interface.
 
@@ -287,6 +324,7 @@ class ChatInterface:
                     max_image_size=5 * 1024 * 1024,
                     default=st.session_state.user_input_default,
                 )
+        self._focus_prompt(prompt_container_key)
         st.session_state.user_input_default = None
 
         if chat_prompt_return and st.session_state.turn_state == TurnState.HUMAN_TURN:
