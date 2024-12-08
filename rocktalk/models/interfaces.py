@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, ValidationError
 from streamlit_chat_prompt import ImageData, PromptReturn, prompt
 from streamlit_js_eval import streamlit_js_eval
 from utils.image_utils import MAX_IMAGE_WIDTH, image_from_b64_image
+from utils.js import focus_prompt
 from utils.log import logger
 from utils.streamlit_utils import (
     OnPillsChange,
@@ -166,13 +167,15 @@ class ChatMessage(BaseModel):
             "Editing message will re-run conversation from this point and will replace any existing conversation past this point!",
             icon="⚠️",
         )
+        edit_prompt_key = f"edit_prompt_{id(self)}"
         prompt_return = prompt(
             "edit prompt",
-            key=f"edit_prompt_{id(self)}",
+            key=edit_prompt_key,
             placeholder=previous_prompt.text or "",
             main_bottom=False,
             default=previous_prompt,
         )
+        focus_prompt(container_key=edit_prompt_key)
 
         if prompt_return:
             st.session_state.edit_message_value = self, prompt_return
