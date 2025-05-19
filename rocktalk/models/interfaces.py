@@ -1,4 +1,8 @@
+import base64
+import io
 import json
+import random
+import re
 import uuid
 from datetime import datetime, timezone
 from functools import partial
@@ -106,26 +110,28 @@ class ChatContentItem(BaseModel):
     thinking_signature: Optional[str] = None
     redacted_thinking: Optional[str] = None
     image_data: Optional[str] = None
+    document_data: Optional[str] = None  # New field for document content
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_content(self) -> "ChatContentItem":
-        """Validate that at least one content type is provided and only one is set"""
+        """Validate that at least one content type is provided"""
         values = self.model_dump()
         content_fields = [
             values.get("text"),
             values.get("thinking"),
             values.get("redacted_thinking"),
             values.get("image_data"),
+            values.get("document_data"),
         ]
 
         # Check if at least one content field is provided
         if not any(content_fields):
-            raise ValueError("At least one content type must be provided")
+            raise ValueError("At least 1 content type must be provided")
 
-        # Check if only one content type is provided
-        if sum(1 for field in content_fields if field is not None) > 1:
-            raise ValueError("Only one content type should be provided")
+        # Check if at most 2 content types are provided
+        if sum(1 for field in content_fields if field is not None) > 2:
+            raise ValueError("At most 2 content types should be provided")
 
         return self
 
@@ -243,6 +249,30 @@ class ChatMessage(BaseModel):
                                 image=pil_image,
                                 width=min(width, MAX_IMAGE_WIDTH),
                             )
+                        elif item.document_data:
+                            doc_format = item.metadata.get("format", "pdf").lower()
+                            doc_name = item.metadata.get("name", "document")
+
+                            # display preview for markdown docs
+                            if doc_format == "markdown":
+                                try:
+                                    markdown_content = base64.b64decode(
+                                        item.document_data
+                                    ).decode("utf-8")
+                                    with st.expander("Preview Content"):
+                                        st.markdown(markdown_content)
+                                except Exception:
+                                    st.warning("Unable to preview markdown content")
+
+                            # download button documents
+                            doc_bytes = io.BytesIO(base64.b64decode(item.document_data))
+                            st.download_button(
+                                label=f":material/download: {doc_name}",
+                                data=doc_bytes,
+                                file_name=doc_name,
+                                mime=item.metadata.get("media_type"),
+                                key=f"download_{doc_name}_{uuid.uuid4()}",
+                            )
                         elif item.thinking:
                             thinking_blocks.append(item.thinking)
                         elif item.redacted_thinking:
@@ -324,9 +354,7 @@ class ChatMessage(BaseModel):
                 if item.text:
                     content_list.append({"type": "text", "text": item.text})
                 elif item.thinking:
-                    if (
-                        st.session_state.app_context.llm.is_thinking_supported()
-                    ):
+                    if st.session_state.app_context.llm.is_thinking_supported():
                         content_list.append(
                             {
                                 "type": "thinking",
@@ -335,9 +363,7 @@ class ChatMessage(BaseModel):
                             }
                         )
                 elif item.redacted_thinking:
-                    if (
-                        st.session_state.app_context.llm.is_thinking_supported()
-                    ):
+                    if st.session_state.app_context.llm.is_thinking_supported():
                         content_list.append(
                             {
                                 "type": "redacted_thinking",
@@ -357,6 +383,54 @@ class ChatMessage(BaseModel):
                             },
                         }
                     )
+                elif item.document_data:
+                    original_name = item.metadata.get("name", "document")
+
+                    # Sanitize name and add random numbers to ensure uniqueness
+                    # "name" field can only contain: Alphanumeric and Whitespace characters, Hyphens, Parentheses, Square brackets
+                    sanitized_name = re.sub(
+                        r"[^a-zA-Z0-9\s\-\(\)\[\]]", " ", original_name
+                    )
+                    sanitized_name = (
+                        re.sub(r"\s+", " ", sanitized_name).strip() or "document"
+                    )
+                    random_suffix = "".join(str(random.randint(0, 9)) for _ in range(5))
+                    sanitized_name = f"{sanitized_name}_{random_suffix}"
+
+                    # Check file extension to determine actual format
+                    ext = (
+                        original_name.lower().split(".")[-1]
+                        if "." in original_name
+                        else ""
+                    )
+
+                    # https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-call.html
+                    # "If you use an AWS SDK, you don't need to encode the document bytes in base64."
+                    original_doc_bytes = base64.b64decode(item.document_data)
+
+                    if ext in [
+                        "docx",
+                        "csv",
+                        "html",
+                        "txt",
+                        "pdf",
+                        "md",
+                        "doc",
+                        "xlsx",
+                        "xls",
+                    ]:
+                        content_list.append(
+                            {
+                                "type": "document",
+                                "document": {
+                                    "format": ext,
+                                    "name": sanitized_name,
+                                    "source": {
+                                        "bytes": original_doc_bytes,
+                                    },
+                                },
+                            }
+                        )
 
             if self.role == "assistant":
                 return AIMessage(content=content_list)
@@ -405,17 +479,32 @@ class ChatMessage(BaseModel):
         content_items: ChatContent = []
         if prompt_data.text:
             content_items.append(ChatContentItem(text=prompt_data.text))
-        if prompt_data.images:
-            for image in prompt_data.images:
-                content_items.append(
-                    ChatContentItem(
-                        image_data=image.data,  # Store the image data in image_url field
-                        metadata={
-                            "format": image.format,
-                            "media_type": image.type,
-                        },
+
+        # Handle files (which could be either images or documents)
+        if prompt_data.files:
+            for file_data in prompt_data.files:
+                if file_data.is_image:
+                    content_items.append(
+                        ChatContentItem(
+                            image_data=file_data.data,
+                            metadata={
+                                "format": file_data.format,
+                                "media_type": file_data.type,
+                                "name": file_data.name,
+                            },
+                        )
                     )
-                )
+                else:
+                    content_items.append(
+                        ChatContentItem(
+                            document_data=file_data.data,
+                            metadata={
+                                "format": file_data.format,
+                                "media_type": file_data.type,
+                                "name": file_data.name,
+                            },
+                        )
+                    )
 
         return ChatMessage.create(
             session_id=session_id,
